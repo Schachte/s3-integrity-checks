@@ -18,14 +18,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-// Logger setup
 var (
 	InfoLogger  = log.New(os.Stdout, "", 0)
 	DebugLogger = log.New(io.Discard, "", 0)
 )
 
 func init() {
-	// Configure loggers
 	InfoLogger = log.New(os.Stdout, "", 0)
 	DebugLogger = log.New(io.Discard, "", 0)
 }

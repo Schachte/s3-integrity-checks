@@ -1,4 +1,4 @@
-.PHONY: all test build clean test-go test-python build-go build-python compare-implementations demo demo-go demo-python scripts-permissions install install-go install-python
+.PHONY: all test build clean test-go test-python build-go build-python compare-implementations demo demo-go demo-python scripts-permissions install install-go install-python demo-aws-cli
 
 # Default Python and Go paths
 PYTHON_SRC := src/python
@@ -27,13 +27,17 @@ DEMO_ENDPOINT := https://https://<S3 ENDPOINT>
 DEMO_PROFILE := default
 DEMO_REGION := auto
 
+# AWS CLI settings
+AWS_CLI := aws
+AWS_CLI_VERSION := $(shell aws --version 2>/dev/null)
+
 all: test build
 
 # Combined commands
-test: test-go test-python
+test: test-go test-python test-aws-cli
 	${INFO} All tests completed successfully
 
-build: build-go build-python
+build: build-go build-python build-aws-cli
 	${INFO} All builds completed successfully
 
 # Go specific commands
@@ -72,8 +76,8 @@ compare-implementations: build
 	@./scripts/compare_implementations.sh
 
 # Demo commands
-demo: demo-go demo-python
-	${INFO} Both demos completed
+demo: demo-go demo-python demo-aws-cli
+	${INFO} All demos completed
 
 demo-go: build-go scripts-permissions
 	${INFO} Running Go demo...
@@ -82,6 +86,10 @@ demo-go: build-go scripts-permissions
 demo-python: build-python scripts-permissions
 	${INFO} Running Python demo...
 	@./scripts/demo.sh python
+
+demo-aws-cli: build-aws-cli scripts-permissions
+	${INFO} Running AWS CLI demo...
+	@./scripts/demo.sh aws-cli
 
 # Add new target for script permissions
 scripts-permissions:
@@ -102,6 +110,46 @@ install-python:
 	${INFO} Installing Python dependencies...
 	python -m pip install --upgrade pip
 	pip install -r ${PYTHON_SRC}/requirements.txt
+
+# AWS CLI specific commands
+check-aws-cli:
+	@if ! command -v ${AWS_CLI} >/dev/null 2>&1; then \
+		echo "AWS CLI is not installed."; \
+		read -p "Would you like to install AWS CLI? (y/n) " answer; \
+		if [ "$$answer" = "y" ]; then \
+			case "$$(uname -s)" in \
+				Linux*) \
+					curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+					unzip awscliv2.zip && \
+					sudo ./aws/install && \
+					rm -rf aws awscliv2.zip ;; \
+				Darwin*) \
+					brew install awscli ;; \
+				*) \
+					echo "Please install AWS CLI manually: https://aws.amazon.com/cli/" ;; \
+			esac \
+		else \
+			echo "AWS CLI is required. Please install it manually: https://aws.amazon.com/cli/"; \
+			exit 1; \
+		fi \
+	else \
+		echo "AWS CLI is installed: ${AWS_CLI_VERSION}"; \
+	fi
+
+test-aws-cli: check-aws-cli
+	${INFO} Running AWS CLI tests...
+	cd src/aws-cli && ./integrity.sh \
+		--bucket ${DEMO_BUCKET} \
+		--text ${DEMO_TEXT} \
+		--key ${DEMO_KEY} \
+		--endpoint-url ${DEMO_ENDPOINT} \
+		--profile ${DEMO_PROFILE} \
+		--region ${DEMO_REGION} \
+		--verbose
+
+build-aws-cli: check-aws-cli
+	${INFO} Setting up AWS CLI script...
+	chmod +x src/aws-cli/integrity.sh
 
 # Help
 help:

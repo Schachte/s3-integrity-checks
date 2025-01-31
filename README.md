@@ -29,6 +29,7 @@ make install
 make test
 make test-python
 make test-go
+make test-aws-cli
 ```
 
 ### Manual Usage
@@ -52,6 +53,15 @@ python src/python/integrity.py \
   -endpoint-url https://my-endpoint.example.com \
   -profile default \
   -region auto
+
+# AWS CLI
+./src/aws-cli/integrity.sh \
+  --bucket my-bucket \
+  --text "Hello, World" \
+  --key test.txt \
+  --endpoint-url https://my-endpoint.example.com \
+  --profile default \
+  --region auto
 ```
 
 #### File Upload
@@ -73,9 +83,18 @@ python src/python/integrity.py \
   -endpoint-url https://my-endpoint.example.com \
   -profile default \
   -region auto
+
+# AWS CLI
+./src/aws-cli/integrity.sh \
+  --bucket my-bucket \
+  --file path/to/myfile.txt \
+  --key uploads/myfile.txt \
+  --endpoint-url https://my-endpoint.example.com \
+  --profile default \
+  --region auto
 ```
 
-Both implementations produce similar output:
+All implementations produce similar output:
 ```
 Initiating multipart upload...
 Uploading part 1...
@@ -103,16 +122,6 @@ python src/python/integrity.py \
   --profile default \
   --region auto \
   --verbose
-
-# Go with file upload
-./bin/integrity \
-  -bucket my-bucket \
-  -file path/to/myfile.txt \
-  -key uploads/myfile.txt \
-  -endpoint-url https://my-endpoint.example.com \
-  -profile default \
-  -region auto \
-  -verbose
 ```
 
 Verbose output includes:
@@ -121,6 +130,7 @@ Verbose output includes:
 - CRC32 checksum details
 - Part upload verification
 - Complete upload verification
+- Local vs Server checksum comparison (AWS CLI only)
 
 
 _Example Output_
@@ -138,25 +148,16 @@ Verbose mode enabled
       "Location": "https://endpoint.example.com/crc32-3/test.txt",
       "VersionId": "7e6b447187b6544b5a1415b0e19814f8"
     },
-    "Metadata": {}
+    "Metadata": {
+      "RequestId": "tx00000000000000000009b-0065c3c8c8-1234567"
+    }
   }
 }
-================================================================================
-Complete Multipart Upload Response:
 
-Response:
-{
-  "Response": {
-    "Body": {
-      "Bucket": "crc32-3",
-      "ETag": "03f72a5ae72e7b35cf4b43ee97eab189-9",
-      "Key": "test.txt",
-      "Location": "https://endpoint.example.com/crc32-3/test.txt",
-      "VersionId": "7e6b447187b6544b5a1415b0e19814f8"
-    },
-    "Metadata": {}
-  }
-}
+Checksum Verification:
+Local CRC32 (Base64): 8uQxUA==
+Server CRC32 (Base64): 8uQxUA==
+✓ Checksums match
 ```
 
 ### Environment Variables
@@ -181,8 +182,11 @@ make compare-implementations
 ```
 
 This will:
-1. Run both implementations with identical parameters
-2. Save outputs to tmp/python_output.txt and tmp/go_output.txt
+1. Run all three implementations with identical parameters
+2. Save outputs to:
+   - tmp/python_output.txt
+   - tmp/go_output.txt
+   - tmp/aws_cli_output.txt
 3. Allow easy comparison of behavior and responses
 
 ## Building
@@ -191,4 +195,5 @@ This will:
 make build
 make build-python
 make build-go
+make build-aws-cli
 ```

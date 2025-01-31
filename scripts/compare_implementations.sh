@@ -20,6 +20,10 @@ python src/python/integrity.py "${PARAMS[@]}" > tmp/python_output.txt 2>&1
 echo "Running Go implementation..."
 ./bin/integrity "${PARAMS[@]}" > tmp/go_output.txt 2>&1
 
+echo "Running AWS CLI implementation..."
+bash src/aws-cli/integrity.sh "${PARAMS[@]}" > tmp/aws_output.txt 2>&1
+
 echo "Outputs written to:"
 echo "  - tmp/python_output.txt"
-echo "  - tmp/go_output.txt" 
+echo "  - tmp/go_output.txt"
+echo "  - tmp/aws_output.txt" 
