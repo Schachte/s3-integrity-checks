@@ -148,6 +148,62 @@ type MultipartUploadInput struct {
 	Verbose     bool
 }
 
+// Add new helper function to verify part checksums
+func verifyPartChecksums(ctx context.Context, client *s3.Client, bucket, key string, uploadID *string, data []byte, partSize int64, completedParts []types.CompletedPart) error {
+	InfoLogger.Println("Listing parts for verification...")
+	partsOutput, err := client.ListParts(ctx, &s3.ListPartsInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(key),
+		UploadId: uploadID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list parts: %v", err)
+	}
+
+	InfoLogger.Printf("\nFound %d parts:\n", len(partsOutput.Parts))
+	InfoLogger.Println(strings.Repeat("-", 80))
+	InfoLogger.Printf("%-8s %-12s %-32s %-24s %s\n", "Part #", "Size", "ETag", "Last Modified", "Checksum (CRC32)")
+	InfoLogger.Println(strings.Repeat("-", 80))
+
+	for _, part := range partsOutput.Parts {
+		InfoLogger.Printf("%-8d %-12d %-32s %-24s %s\n",
+			part.PartNumber,
+			part.Size,
+			aws.ToString(part.ETag),
+			part.LastModified.Format("2006-01-02 15:04:05 MST"),
+			aws.ToString(part.ChecksumCRC32),
+		)
+	}
+	InfoLogger.Println(strings.Repeat("-", 80))
+
+	if len(partsOutput.Parts) != len(completedParts) {
+		return fmt.Errorf("parts count mismatch: uploaded %d, listed %d", len(completedParts), len(partsOutput.Parts))
+	}
+
+	buffer := bytes.NewReader(data)
+	for _, part := range partsOutput.Parts {
+		partBuffer := make([]byte, partSize)
+		n, err := buffer.Read(partBuffer)
+		if err != nil && err != io.EOF {
+			return fmt.Errorf("error reading part data: %v", err)
+		}
+
+		partData := partBuffer[:n]
+		expectedChecksum := ComputeCRC32(partData)
+
+		if part.ChecksumCRC32 == nil {
+			return fmt.Errorf("part %d missing CRC32 checksum", part.PartNumber)
+		}
+
+		if *part.ChecksumCRC32 != expectedChecksum {
+			return fmt.Errorf("checksum mismatch for part %d: expected %s, got %s",
+				part.PartNumber, expectedChecksum, *part.ChecksumCRC32)
+		}
+	}
+
+	return nil
+}
+
 // MultipartUpload handles the upload process with integrity checking
 func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadStatus, error) {
 	if input.Verbose {
@@ -200,6 +256,7 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(input.Region),
 		config.WithEndpointResolver(customResolver),
+		config.WithSharedConfigProfile(input.Profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to load SDK config: %v", err)
@@ -302,6 +359,19 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 		InfoLogger.Printf("✓ Part %d uploaded and verified (%d/%d bytes)\n", partNumber, bytesUploaded, totalSize)
 		partNumber++
 	}
+
+	// Verify all parts
+	InfoLogger.Println("\nVerifying uploaded parts...")
+	status.StartPhase(Verification, 0)
+
+	err = verifyPartChecksums(ctx, client, input.Bucket, input.Key, uploadID, data, partSize, completedParts)
+	if err != nil {
+		status.EndPhase(false, "Failed to verify parts", err)
+		return status, &UploadError{Phase: status.Phases[len(status.Phases)-1]}
+	}
+
+	status.EndPhase(true, "All parts verified successfully", nil)
+	InfoLogger.Println("✓ All parts verified successfully")
 
 	// Complete multipart upload
 	InfoLogger.Println("\nCompleting multipart upload...")

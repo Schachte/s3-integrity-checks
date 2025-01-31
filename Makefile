@@ -1,4 +1,4 @@
-.PHONY: all test build clean test-go test-python build-go build-python compare-implementations demo demo-go demo-python scripts-permissions install install-go install-python demo-aws-cli
+.PHONY: all test build clean test-go test-python build-go build-python compare-implementations demo demo-go demo-python scripts-permissions install install-go install-python demo-aws-cli s3-go s3-python s3-aws-cli
 
 # Default Python and Go paths
 PYTHON_SRC := src/python
@@ -150,6 +150,49 @@ test-aws-cli: check-aws-cli
 build-aws-cli: check-aws-cli
 	${INFO} Setting up AWS CLI script...
 	chmod +x src/aws-cli/integrity.sh
+
+# S3 settings (referencing existing demo settings)
+S3_BUCKET := crc32
+S3_TEXT := "Hello, World"
+S3_KEY := test.txt
+S3_ENDPOINT := ${S3_ENDPOINT}
+S3_PROFILE := default
+S3_REGION := auto
+
+# Direct SDK commands
+s3-go: build-go
+	@echo "Running Go S3 implementation..."
+	./bin/integrity \
+		-bucket ${S3_BUCKET} \
+		-text ${S3_TEXT} \
+		-key ${S3_KEY} \
+		-endpoint-url ${S3_ENDPOINT} \
+		-profile ${S3_PROFILE} \
+		-region ${S3_REGION} \
+		-verbose
+
+s3-python: build-python
+	@echo "Running Python S3 implementation..."
+	python src/python/integrity.py \
+		--bucket ${S3_BUCKET} \
+		--text ${S3_TEXT} \
+		--key ${S3_KEY} \
+		--endpoint-url ${S3_ENDPOINT} \
+		--profile ${S3_PROFILE} \
+		--region ${S3_REGION} \
+		--verbose
+
+s3-aws-cli: build-aws-cli
+	@echo "Running AWS CLI S3 implementation..."
+	./src/aws-cli/integrity.sh \
+		--bucket ${S3_BUCKET} \
+		--text ${S3_TEXT} \
+		--key ${S3_KEY} \
+		--endpoint-url ${S3_ENDPOINT} \
+		--profile ${S3_PROFILE} \
+		--region ${S3_REGION} \
+		--verbose
+
 
 # Help
 help:
