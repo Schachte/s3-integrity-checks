@@ -1,0 +1,47 @@
+# Build artifacts
+bin/
+tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# AWS
+.aws/
+credentials
+config
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+
+# OS
+.DS_Store
+Thumbs.db
+
+./scripts/tmp
+tmp
+src/s3_integrity.egg-info
