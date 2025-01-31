@@ -37,6 +37,19 @@ run_demo() {
                 --region "${REGION}" \
                 --verbose
             ;;
+        "Running AWS CLI Implementation")
+            TMPFILE=$(mktemp)
+            echo "${TEXT}" > "${TMPFILE}"
+            ${cmd} \
+                --bucket "${BUCKET}" \
+                --text "${TEXT}" \
+                --key "${KEY}" \
+                --endpoint-url "${ENDPOINT}" \
+                --profile "${PROFILE}" \
+                --region "${REGION}" \
+                --verbose
+            rm "${TMPFILE}"
+            ;;
     esac
 
     echo
@@ -51,8 +64,11 @@ case "$1" in
     "python")
         run_demo "Running Python Implementation" "python src/python/integrity.py"
         ;;
+    "aws-cli")
+        run_demo "Running AWS CLI Implementation" "$(pwd)/src/aws-cli/integrity.sh"
+        ;;
     *)
-        echo "Usage: $0 [go|python]"
+        echo "Usage: $0 [go|python|aws-cli]"
         exit 1
         ;;
 esac 
