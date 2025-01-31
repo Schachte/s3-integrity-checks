@@ -142,7 +142,8 @@ func ComputeCRC32(data []byte) string {
 type MultipartUploadInput struct {
 	Bucket      string
 	Key         string
-	Data        []byte
+	Data        []byte // For direct byte data
+	FilePath    string // For file path input
 	EndpointURL string
 	Region      string
 	Profile     string
@@ -154,8 +155,8 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 	if input.Verbose {
 		DebugLogger.SetOutput(os.Stdout)
 		printVerbose("Input Configuration", map[string]interface{}{
-			"file":         nil,
-			"text":         string(input.Data),
+			"file":         input.FilePath,
+			"text":         input.Data != nil,
 			"bucket":       input.Bucket,
 			"key":          input.Key,
 			"endpoint_url": input.EndpointURL,
@@ -165,6 +166,22 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 			"profile":      input.Profile,
 			"verbose":      input.Verbose,
 		})
+	}
+
+	// Handle file input
+	var data []byte
+	var err error
+	if input.FilePath != "" {
+		data, err = os.ReadFile(input.FilePath)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read file: %v", err)
+		}
+	} else {
+		data = input.Data
+	}
+
+	if len(data) == 0 {
+		return nil, fmt.Errorf("no data provided: either Data or FilePath must be set")
 	}
 
 	status := &UploadStatus{}
@@ -225,10 +242,10 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 	// Upload parts
 	partSize := int64(8 * 1024 * 1024) // 8MB chunks
 	var completedParts []types.CompletedPart
-	buffer := bytes.NewReader(input.Data)
+	buffer := bytes.NewReader(data)
 	partNumber := int32(1)
 	bytesUploaded := int64(0)
-	totalSize := int64(len(input.Data))
+	totalSize := int64(len(data))
 
 	for {
 		partBuffer := make([]byte, partSize)

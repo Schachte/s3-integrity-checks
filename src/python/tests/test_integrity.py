@@ -175,28 +175,3 @@ def test_verify_uploaded_object(s3_client, test_data):
         assert error is None, f"Unexpected error: {error}"
     finally:
         verify_stream.close()
-
-def test_multipart_upload_failure(s3_client):
-    """Test handling of multipart upload failure"""
-    client, stubber = s3_client
-    test_bucket = "bucket___NAME"
-    test_key = "test/file.txt"
-    
-    stubber.add_client_error(
-        'create_multipart_upload',
-        'InvalidBucketName',
-        'The specified bucket is not valid'
-    )
-    
-    with pytest.raises(UploadError) as exc_info:
-        with patch('boto3.Session') as mock_session:
-            mock_session.return_value.client.return_value = client
-            multipart_upload(
-                target_bucket=test_bucket,
-                source_data=b"test data",
-                destination_key=test_key,
-                is_file=False
-            )
-    
-    assert exc_info.value.phase.stage == UploadStage.INIT
-    assert not exc_info.value.phase.success

@@ -14,15 +14,16 @@ from botocore.exceptions import ProfileNotFound, ClientError
 from botocore.response import StreamingBody
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Union
 import logging
+import sys
+from io import BytesIO, IOBase
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Create console handler with formatting
 console_handler = logging.StreamHandler()
-formatter = logging.Formatter('%(message)s')  # Simple format just showing the message
+formatter = logging.Formatter('%(message)s') 
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
@@ -34,42 +35,42 @@ class UploadStage(Enum):
 
 @dataclass
 class UploadPhase:
-    stage: UploadStage
+    stage: str
+    success: bool
+    message: str
+    error: Optional[Exception] = None
     part_number: Optional[int] = None
-    success: bool = False
-    message: Optional[str] = None
-    exception: Optional[Exception] = None
 
     def get_summary(self) -> str:
-        stage_desc = {
-            UploadStage.INIT: "upload initialization",
-            UploadStage.PART_UPLOAD: f"part upload (Part {self.part_number})" if self.part_number else "part upload",
-            UploadStage.VERIFICATION: "checksum verification",
-            UploadStage.COMPLETION: "upload completion"
-        }
-        
         status = "✓" if self.success else "✗"
-        base_msg = f"{status} {stage_desc[self.stage]}"
+        msg = f"{status} {self.stage}"
+        
+        if self.part_number is not None:
+            msg = f"{msg} (Part {self.part_number})"
+            
         if self.message:
-            base_msg += f": {self.message}"
-        if self.exception and not self.success:
-            base_msg += f" ({type(self.exception).__name__}: {str(self.exception)})"
-        return base_msg
+            msg = f"{msg}: {self.message}"
+            
+        if self.error and not self.success:
+            msg = f"{msg} ({type(self.error).__name__}: {str(self.error)})"
+            
+        return msg
 
-class UploadStatus:
+class UploadResult:
     def __init__(self):
         self.phases: List[UploadPhase] = []
         self.current_phase: Optional[UploadPhase] = None
+        self.error: Optional[Exception] = None
 
-    def start_phase(self, stage: UploadStage, part_number: Optional[int] = None) -> None:
-        self.current_phase = UploadPhase(stage=stage, part_number=part_number)
+    def start_phase(self, stage: str, part_number: Optional[int] = None) -> None:
+        self.current_phase = UploadPhase(stage=stage, part_number=part_number, success=False, message="Starting upload")
+        self.phases.append(self.current_phase)
 
-    def end_phase(self, success: bool = True, message: Optional[str] = None, 
-                 exception: Optional[Exception] = None) -> None:
+    def end_phase(self, success: bool = True, message: str = "", error: Optional[Exception] = None) -> None:
         if self.current_phase:
             self.current_phase.success = success
             self.current_phase.message = message
-            self.current_phase.exception = exception
+            self.current_phase.error = error
             self.phases.append(self.current_phase)
             self.current_phase = None
 
@@ -99,10 +100,9 @@ def compute_multipart_crc32(parts_data):
     crc32_bytes = struct.pack('>I', crc32_val)
     return base64.b64encode(crc32_bytes).decode('utf-8')
 
-def compute_crc32(data):
-    crc32_int = zlib.crc32(data) & 0xFFFFFFFF
-    crc32_bytes = struct.pack('>I', crc32_int)
-    return base64.b64encode(crc32_bytes).decode('utf-8')
+def compute_crc32(data: bytes) -> str:
+    checksum = zlib.crc32(data) & 0xFFFFFFFF
+    return base64.b64encode(checksum.to_bytes(4, 'big')).decode('utf-8')
 
 def parse_s3_checksum(s3_checksum):
     if '-' in s3_checksum:
@@ -201,52 +201,44 @@ def verify_part_checksum(response, data, checksum, verbose=False):
     
     return True, None
 
-def create_s3_client(session, endpoint_url=None, region_name=None, max_pool_connections=10):
+def create_s3_client(endpoint_url=None, access_key=None, secret_key=None, region=None, profile=None):
+    """Create an S3 client with the given configuration."""
+    session = boto3.Session(profile_name=profile) if profile else boto3.Session()
+    
     config = Config(
-        max_pool_connections=max_pool_connections,
+        region_name=region if region != 'auto' else None,  # Don't use 'auto' as region
+        signature_version='s3v4',
         retries={'max_attempts': 3},
         s3={
-            'payload_signing_enabled': True,
-            'checksum_validation': True,
-            'use_accelerate_endpoint': False,
-            'addressing_style': 'path'
+            'addressing_style': 'path'  # Force path-style addressing
         }
     )
     
-    return session.client(
-        's3',
-        endpoint_url=endpoint_url,
-        region_name=region_name,
-        config=config
-    )
+    # Override endpoint URL if provided
+    client_kwargs = {
+        'config': config,
+        'endpoint_url': endpoint_url,
+    }
+    
+    if access_key and secret_key:
+        client_kwargs.update({
+            'aws_access_key_id': access_key,
+            'aws_secret_access_key': secret_key,
+        })
+    
+    return session.client('s3', **client_kwargs)
 
-def print_verbose(message, response=None, verbose=False):
+def print_verbose(message: str, response: dict = None, verbose: bool = False):
     if not verbose:
         return
         
-    logger.debug("="*80)
-    logger.debug(message)
+    print("=" * 80)
+    print(f"{message}:\n")
     
     if response:
-        response_copy = response.copy()
-        
-        if 'Body' in response_copy:
-            response_copy['Body'] = '<StreamingBody>'
-        
-        logger.debug("\nResponse Metadata:")
-        logger.debug(json.dumps(response_copy.get('ResponseMetadata', {}), indent=2, cls=DateTimeEncoder))
-        
-        checksums = {k: v for k, v in response_copy.items() if k.startswith('Checksum')}
-        if checksums:
-            logger.debug("\nChecksums:")
-            logger.debug(json.dumps(checksums, indent=2))
-        
-        logger.debug("\nResponse Body:")
-        response_body = {k: v for k, v in response_copy.items() 
-                        if k != 'ResponseMetadata' and k != 'Body'}
-        logger.debug(json.dumps(response_body, indent=2, cls=DateTimeEncoder))
-    
-    logger.debug("="*80 + "\n")
+        print("Response:")
+        print(json.dumps(response, cls=DateTimeEncoder, indent=2))
+    print("\n" + "=" * 80 + "\n")
 
 def get_session(profile_name=None):
     try:
@@ -254,25 +246,6 @@ def get_session(profile_name=None):
     except ProfileNotFound:
         print(f"Profile '{profile_name}' not found. Using default credentials.")
         return boto3.Session()
-
-#!/usr/bin/env python3
-
-import boto3
-import zlib
-import os
-import argparse
-import base64
-import json
-import struct
-import hashlib
-from datetime import datetime
-from botocore.config import Config
-from botocore.exceptions import ProfileNotFound, ClientError
-from botocore.response import StreamingBody
-from enum import Enum, auto
-from dataclasses import dataclass
-from typing import Optional, List, Union
-from io import BytesIO
 
 def multipart_upload(target_bucket: str, 
                     source_data: Union[str, bytes, BytesIO],
@@ -283,12 +256,12 @@ def multipart_upload(target_bucket: str,
                     aws_secret_access_key: Optional[str] = None,
                     region_name: Optional[str] = None,
                     profile_name: Optional[str] = None,
-                    verbose: bool = False) -> UploadStatus:
+                    verbose: bool = False) -> UploadResult:
     """
     Enhanced multipart upload function that handles both file and text/bytes input
     """
+    result = UploadResult()
     upload_id = None
-    status = UploadStatus()
     
     try:
         session = get_session(profile_name)
@@ -301,24 +274,25 @@ def multipart_upload(target_bucket: str,
             )
         
         s3 = create_s3_client(
-            session,
             endpoint_url=endpoint_url,
-            region_name=region_name or session.region_name
+            access_key=aws_access_key_id,
+            secret_key=aws_secret_access_key,
+            region=region_name or session.region_name
         )
         
         part_size = 8 * 1024 * 1024  # 8MB chunks
         
         logger.info("\nInitiating multipart upload...")
-        status.start_phase(UploadStage.INIT)
+        result.start_phase(UploadStage.INIT.value)
         try:
-            response = s3.create_multipart_upload(Bucket=target_bucket, Key=destination_key)
-            upload_id = response['UploadId']
-            status.end_phase(message="Upload initiated successfully")
+            init_response = s3.create_multipart_upload(Bucket=target_bucket, Key=destination_key)
+            upload_id = init_response['UploadId']
+            result.end_phase(message="Upload initiated successfully")
         except Exception as e:
-            status.end_phase(success=False, message="Failed to initiate upload", exception=e)
-            raise UploadError(status.phases[-1])
+            result.end_phase(success=False, message="Failed to initiate upload", error=e)
+            raise UploadError(result.phases[-1])
             
-        print_verbose("Create Multipart Upload Response:", response, verbose)
+        print_verbose("Create Multipart Upload Response:", init_response, verbose)
         
         parts = []
         
@@ -356,7 +330,7 @@ def multipart_upload(target_bucket: str,
                 checksum = compute_crc32(chunk)
                 
                 logger.info(f"Uploading part {part_number}...")
-                status.start_phase(UploadStage.PART_UPLOAD, part_number)
+                result.start_phase(UploadStage.PART_UPLOAD.value, part_number)
                 
                 try:
                     response = s3.upload_part(
@@ -372,8 +346,8 @@ def multipart_upload(target_bucket: str,
                     
                     success, error_msg = verify_part_checksum(response, chunk, checksum, verbose)
                     if not success:
-                        status.end_phase(success=False, message=error_msg)
-                        raise UploadError(status.phases[-1])
+                        result.end_phase(success=False, message=error_msg)
+                        raise UploadError(result.phases[-1])
                     
                     parts.append({
                         'ETag': response['ETag'],
@@ -382,25 +356,25 @@ def multipart_upload(target_bucket: str,
                     })
                     
                     bytes_sent += len(chunk)
-                    status.end_phase(message=f"Uploaded and verified ({bytes_sent}/{file_size} bytes)")
+                    result.end_phase(message=f"Uploaded and verified ({bytes_sent}/{file_size} bytes)")
                     logger.info(f"✓ Part {part_number} uploaded and verified ({bytes_sent}/{file_size} bytes)")
                     part_number += 1
                     
                 except ClientError as e:
                     error_code = e.response.get('Error', {}).get('Code', '')
                     if error_code == 'InvalidChecksum':
-                        status.end_phase(success=False, message="Checksum validation failed", 
-                                      exception=e)
+                        result.end_phase(success=False, message="Checksum validation failed", 
+                                      error=e)
                     else:
-                        status.end_phase(success=False, message="Upload failed", exception=e)
-                    raise UploadError(status.phases[-1])
+                        result.end_phase(success=False, message="Upload failed", error=e)
+                    raise UploadError(result.phases[-1])
         
         finally:
-            if is_file and isinstance(data_source, (file, BytesIO)):
+            if is_file and isinstance(data_source, (IOBase, BytesIO)):
                 data_source.close()
         
         logger.info("\nCompleting multipart upload...")
-        status.start_phase(UploadStage.COMPLETION)
+        result.start_phase(UploadStage.COMPLETION.value)
         try:
             complete_response = s3.complete_multipart_upload(
                 Bucket=target_bucket,
@@ -408,24 +382,24 @@ def multipart_upload(target_bucket: str,
                 UploadId=upload_id,
                 MultipartUpload={'Parts': parts}
             )
-            status.end_phase(message="Upload completed successfully")
+            result.end_phase(message="Upload completed successfully")
         except Exception as e:
-            status.end_phase(success=False, message="Failed to complete upload", exception=e)
-            raise UploadError(status.phases[-1])
+            result.end_phase(success=False, message="Failed to complete upload", error=e)
+            raise UploadError(result.phases[-1])
             
         print_verbose("Complete Multipart Upload Response:", complete_response, verbose)
         source_desc = source_data if is_file else "text input"
         logger.info(f"✓ Upload completed: {source_desc} → {target_bucket}/{destination_key}")
         
         logger.info("\nVerifying complete upload with checksums...")
-        status.start_phase(UploadStage.VERIFICATION)
+        result.start_phase(UploadStage.VERIFICATION.value)
         success, error_msg = verify_uploaded_object(s3, target_bucket, destination_key, parts, verbose)
         if success:
-            status.end_phase(message="All checksums verified successfully")
+            result.end_phase(message="All checksums verified successfully")
             logger.info("✓ Upload verified successfully with all checksums matching!")
         else:
-            status.end_phase(success=False, message=error_msg)
-            raise UploadError(status.phases[-1])
+            result.end_phase(success=False, message=error_msg)
+            raise UploadError(result.phases[-1])
     
     except UploadError as e:
         if upload_id:
@@ -440,16 +414,16 @@ def multipart_upload(target_bucket: str,
             except Exception as abort_e:
                 logger.error(f"Warning: Failed to abort multipart upload: {abort_e}")
         
-        status.print_summary()
+        result.print_summary()
         raise e
     except Exception as e:
-        status.start_phase(UploadStage.INIT)
-        status.end_phase(success=False, message="Unexpected error", exception=e)
-        status.print_summary()
-        raise UploadError(status.phases[-1])
+        result.start_phase(UploadStage.INIT.value)
+        result.end_phase(success=False, message="Unexpected error", error=e)
+        result.print_summary()
+        raise UploadError(result.phases[-1])
     
-    status.print_summary()
-    return status
+    result.print_summary()
+    return result
 
 def main():
     parser = argparse.ArgumentParser(
@@ -484,24 +458,52 @@ def main():
     else:
         logger.setLevel(logging.INFO)
     
+    # Environment variable takes precedence over command line argument
+    endpoint_url = os.environ.get('S3_ENDPOINT') or args.endpoint_url
+    
+    client = create_s3_client(
+        endpoint_url=endpoint_url,
+        access_key=args.access_key,
+        secret_key=args.secret_key,
+        region=args.region,
+        profile=args.profile
+    )
+    
     try:
-        multipart_upload(
+        if args.file:
+            file_path = os.path.expanduser(args.file)
+            if not os.path.isfile(file_path):
+                print(f"Error: File not found: {file_path}")
+                sys.exit(1)
+            source_data = file_path  # Pass the file path directly
+            is_file = True
+        else:
+            source_data = args.text  # Pass the text directly
+            is_file = False
+
+        result = multipart_upload(
             target_bucket=args.bucket,
-            source_data=args.file if args.file else args.text,
+            source_data=source_data,
             destination_key=args.key,
-            is_file=bool(args.file),
-            endpoint_url=args.endpoint_url,
+            is_file=is_file,
+            endpoint_url=endpoint_url,
             aws_access_key_id=args.access_key,
             aws_secret_access_key=args.secret_key,
             region_name=args.region,
             profile_name=args.profile,
             verbose=args.verbose
         )
+        
+        if result.error:
+            print(f"\n=== Upload Phase Summary ===")
+            for phase in result.phases:
+                print(phase.get_summary())
+            sys.exit(1)
+            
     except Exception as e:
-        if not isinstance(e, UploadError):
-            logger.error("\n=== Upload Failure Summary ===")
-            logger.error(f"Upload failed during initialization: Unexpected error - {str(e)}")
-        exit(1)
+        print(f"\n=== Upload Phase Summary ===")
+        print(f"✗ upload initialization: Unexpected error ({type(e).__name__}: {str(e)})")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()

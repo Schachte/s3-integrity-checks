@@ -5,51 +5,77 @@ import (
 	"flag"
 	"fmt"
 	"os"
-
-	s3integrity "s3-integrity-checks/src/go"
+	s3_integrity_checks "s3-integrity-checks/src/go"
 )
 
 func main() {
-	var (
-		bucket      string
-		key         string
-		text        string
-		endpointURL string
-		region      string
-		profile     string
-		verbose     bool
-	)
+	var filePath string
+	var text string
+	var bucket string
+	var key string
+	var endpointURL string
+	var profile string
+	var region string
+	var verbose bool
 
+	flag.StringVar(&filePath, "file", "", "Path to the file to upload")
+	flag.StringVar(&text, "text", "", "Text content to upload")
 	flag.StringVar(&bucket, "bucket", "", "S3 bucket name")
 	flag.StringVar(&key, "key", "", "S3 object key")
-	flag.StringVar(&text, "text", "", "Text content to upload")
 	flag.StringVar(&endpointURL, "endpoint-url", "", "S3 endpoint URL")
-	flag.StringVar(&region, "region", "us-east-1", "AWS region")
 	flag.StringVar(&profile, "profile", "", "AWS profile name")
+	flag.StringVar(&region, "region", "us-east-1", "AWS region")
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output")
 	flag.BoolVar(&verbose, "v", false, "Enable verbose output (shorthand)")
 
 	flag.Parse()
 
-	if bucket == "" || key == "" || text == "" {
-		fmt.Println("Error: bucket, key, and text are required")
+	if bucket == "" {
+		fmt.Println("Error: --bucket is required")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	input := s3integrity.MultipartUploadInput{
+	if key == "" {
+		fmt.Println("Error: --key is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if filePath == "" && text == "" {
+		fmt.Println("Error: either --file or --text must be provided")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if filePath != "" && text != "" {
+		fmt.Println("Error: cannot provide both --file and --text")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Create input configuration
+	input := s3_integrity_checks.MultipartUploadInput{
 		Bucket:      bucket,
 		Key:         key,
-		Data:        []byte(text),
+		FilePath:    filePath,
 		EndpointURL: endpointURL,
 		Region:      region,
 		Profile:     profile,
 		Verbose:     verbose,
 	}
 
-	_, err := s3integrity.MultipartUpload(context.Background(), input)
+	// If text is provided, convert it to bytes
+	if text != "" {
+		input.Data = []byte(text)
+	}
+
+	// Perform upload
+	status, err := s3_integrity_checks.MultipartUpload(context.Background(), input)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if status != nil {
+			status.PrintSummary()
+		}
 		os.Exit(1)
 	}
 }
