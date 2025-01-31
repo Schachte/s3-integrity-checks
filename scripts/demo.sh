@@ -1,6 +1,6 @@
 #!/bin/bash
 
-BUCKET="crc32-3"
+BUCKET="crc32"
 TEXT="Hello, World"
 KEY="test.txt"
 ENDPOINT="${S3_ENDPOINT:-https://your-endpoint.example.com}"

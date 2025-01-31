@@ -20,7 +20,7 @@ NC := \033[0m # No Color
 INFO := @echo "${GREEN}=>${NC}"
 
 # Demo settings
-DEMO_BUCKET := crc32-3
+DEMO_BUCKET := crc32
 DEMO_TEXT := "Hello, World"
 DEMO_KEY := test.txt
 DEMO_ENDPOINT := https://https://<S3 ENDPOINT>

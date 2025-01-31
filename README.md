@@ -131,13 +131,17 @@ make compare-implementations
 
 This will:
 1. Run both implementations with identical parameters
-2. Save outputs to tmp/python_output.txt and tmp/go_output.txt
+2. Save outputs to `tmp/python_output.txt` and `tmp/go_output.txt`
 3. Allow easy comparison of behavior and responses
 
 ### Environment Variables
 - `S3_ENDPOINT`: Override the default S3 endpoint URL
 
 Example:
+
+A prebuilt demo script can run out of the box with the default endpoint, but you can override it with the `S3_ENDPOINT` environment variable.
+Note: You should first ensure the bucket `crc32` exists first.
+
 ```bash
 # Run demo with custom endpoint
 S3_ENDPOINT="https://my-custom-endpoint.com" make demo

@@ -5,7 +5,7 @@ mkdir -p tmp
 ENDPOINT="${S3_ENDPOINT:-https://your-endpoint.example.com}"
 
 PARAMS=(
-    --bucket crc32-3
+    --bucket crc32
     --text "Hello, World"
     --key test.txt
     --endpoint-url "${ENDPOINT}"
