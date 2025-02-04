@@ -270,8 +270,9 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 
 	// Create multipart upload
 	createResp, err := client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
-		Bucket: aws.String(input.Bucket),
-		Key:    aws.String(input.Key),
+		Bucket:            aws.String(input.Bucket),
+		Key:               aws.String(input.Key),
+		ChecksumAlgorithm: types.ChecksumAlgorithmCrc32,
 	})
 	if err != nil {
 		status.EndPhase(false, "Failed to initiate upload", err)
@@ -350,8 +351,9 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 		}
 
 		completedParts = append(completedParts, types.CompletedPart{
-			ETag:       uploadResp.ETag,
-			PartNumber: aws.Int32(partNumber),
+			ETag:          uploadResp.ETag,
+			PartNumber:    aws.Int32(partNumber),
+			ChecksumCRC32: aws.String(checksum),
 		})
 
 		bytesUploaded += int64(n)
@@ -395,11 +397,12 @@ func MultipartUpload(ctx context.Context, input MultipartUploadInput) (*UploadSt
 			"Response": map[string]interface{}{
 				"Metadata": completeResp.ResultMetadata,
 				"Body": map[string]interface{}{
-					"Location":  completeResp.Location,
-					"Bucket":    input.Bucket,
-					"Key":       input.Key,
-					"ETag":      completeResp.ETag,
-					"VersionId": completeResp.VersionId,
+					"Location":      completeResp.Location,
+					"Bucket":        input.Bucket,
+					"Key":           input.Key,
+					"ETag":          completeResp.ETag,
+					"VersionId":     completeResp.VersionId,
+					"ChecksumCRC32": completeResp.ChecksumCRC32,
 				},
 			},
 		})
