@@ -22,6 +22,9 @@ make install
 - `--region`: AWS region (default: us-east-1)
 - `--profile`: AWS profile name
 - `--verbose`: Enable verbose output
+- `--part-size`: Size of each part in bytes (Go only, default: 5MB)
+- `--parts`: Comma-separated list of part indices to include in final object (Go only, e.g., '1,2,4')
+- `--upload-empty-part`: Upload an empty part as the final part (Go only)
 
 ### Run Tests
 ```bash
@@ -75,14 +78,17 @@ python src/python/integrity.py \
   --profile default \
   --region auto
 
-# Go
+# Go (with new options)
 ./bin/integrity \
   -bucket my-bucket \
   -file path/to/myfile.txt \
   -key uploads/myfile.txt \
   -endpoint-url https://my-endpoint.example.com \
   -profile default \
-  -region auto
+  -region auto \
+  -part-size 10485760 \  # Use 10MB parts
+  -parts "1,2,4" \       # Only include parts 1, 2, and 4 in final object
+  -upload-empty-part     # Add empty final part
 
 # AWS CLI
 ./src/aws-cli/integrity.sh \
